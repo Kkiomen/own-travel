@@ -8,6 +8,8 @@ Private, non-commercial travel-deals app, meant to run 24/7 on a VPS. Goal: scan
 
 **There is no authentication and none should be added** — it is a single-owner app. Fortify, the `User` model, login/register/settings pages and the `auth`/`verified` middleware were all removed on purpose. `/` renders the Dashboard directly.
 
+Because there is no login, **the dashboard also asks not to be indexed**, in three places that cover different failure modes: `public/robots.txt` disallows everything, `PreventIndexing` puts `X-Robots-Tag: noindex, nofollow, noarchive` on *every* response (global middleware, so JSON and `/up` are covered as well), and the head carries the same as a `<meta name="robots">` for anything that fetches a page without honouring the header. Note the tension in that combination: a crawler that obeys `robots.txt` never fetches the page, so it never reads the `noindex` - which means a URL discovered elsewhere can still be listed bare. Allowing the crawl is what makes `noindex` binding. **None of this is a security control** - the real protection is not exposing the port.
+
 ## What is built
 
 `deals:scan` (scheduled hourly in `routes/console.php`, run by the `scheduler` container) asks every configured source for offers, rates them, drops anything above the price gate, stores what it has not seen before and hands the good ones to the notifier. `deals:prune` (daily) clears out what has expired. The dashboard at `/` ranks what is left.
@@ -18,7 +20,7 @@ Live sources, all verified against real responses:
 | --- | --- | --- |
 | `ryanair` | `services-api.ryanair.com/farfnd/v4/oneWayFares` | Public, no key, filters by price and date itself. One request per departure airport. |
 | `ryanair-return` | `.../farfnd/v4/roundTripFares` | Pairs both legs itself and caps the stay via `durationFrom`/`durationTo`. **`limit` above 20 is rejected with `InvalidLimit`** (the one-way endpoint accepts 100) — it answers cheapest-first, so 20 is the best twenty pairings per airport, and `page` is ignored. |
-| `wizzair` | `be.wizzair.com/{version}/Api/search/timetable` | Version is bumped every few weeks and is scraped from the public site (cached 24 h) with a configured fallback. Needs explicit routes — see `config/deals.wizzair.routes`. **Days with no flight come back priced at 0**, and are dropped. One request returns both directions, so the adapter pairs the legs itself. |
+| `wizzair` | `be.wizzair.com/{version}/Api/search/timetable` | Version is bumped every few weeks and is scraped from the public site (cached 24 h) with a configured fallback. Needs explicit routes — see `config/deals.wizzair.routes`. **Days with no flight come back priced at 0**, and are dropped. One request returns both directions, so the adapter pairs the legs itself. **The timetable names no airports, only codes** — `WizzAirStationDirectory` reads the whole station list (`/Api/asset/map?languageCode=pl-pl`, ~660 kB, cached a week) so its offers do not sit on the board as a bare `LTN` next to Ryanair's `Londyn-Luton`. A directory that cannot be reached is not an outage: the offer still shows, under its code. |
 | `fly4free`, `wakacyjni-piraci` | RSS + article scraping | Price and offer type come from the Polish headline; length, board and hotel standard from the article. Items without a price are skipped. **fly4free's feed paginates (`?paged=N`, 20 posts a page) and is walked `deals.feeds[].pages` deep**; Wakacyjni Piraci answer with the same 28 offers whatever page is asked for. loter.pl blocks us and is not wired up. |
 
 ### Finding the trips in a feed
@@ -63,7 +65,7 @@ Defaults reflect how the app is actually used: one-way flights up to 300 PLN (10
 
 Notification is `LogDealNotifier` for now — deliberately a placeholder. The `DealNotifier` port exists so adding Telegram or e-mail is one adapter plus one binding in `DealServiceProvider`.
 
-Dedup is by fingerprint: type + route + dates + price (feed items use their link instead of a route). **The source is deliberately not part of it** — several queries hit the same flights, and the same seats on the same days at the same price are one offer however many of them turned it up. A **price drop produces a new fingerprint on purpose**, so a cheaper seat on a known route alerts again.
+Dedup is by fingerprint: type + route + dates + price (feed items use their link instead of a route). **The source is deliberately not part of it** — several queries hit the same flights, and the same seats on the same days at the same price are one offer however many of them turned it up. Names are not part of it either, which is why finding a known offer again **fills in airport names it was stored without** rather than discarding the better version — that is what let 2 000 nameless Wizz Air rows recover instead of waiting to expire. A **price drop produces a new fingerprint on purpose**, so a cheaper seat on a known route alerts again.
 
 `deals:prune` (scheduled daily) drops flights once they have departed and anything older than `deals.retention_days`. The listing query excludes departed flights too, so the dashboard stays honest between prunes.
 
@@ -90,6 +92,20 @@ Routes come from what the one-way search already found cheap, so nothing is conf
 ### Listing
 
 **Ordering and every filter happen in the query** — `DealListing` carries the sort, the kind, weekends-only, origin and destination, plus `preferredOrigin` (`deals.preferred_origin`, WRO) which lists the home airport first whatever the sort — never in the Vue page. Hundreds of deals are kept and only `deals.dashboard_limit` are sent: sorting or filtering the page instead would rank the wrong ones and could show an empty tab while the database is full of matches. The stat tiles come from `DealRepository::summarise()` for the same reason.
+
+**The airport lists are facets, not a fixed inventory.** `availableAirports()` takes the same `DealListing` and runs it through the same filters as the listing itself (`onlyWhatIsAskedFor()` serves both, so they cannot drift apart), with one twist: each side ignores its own filter. Pick Wrocław and "Dokąd" offers where Wrocław actually flies; narrowing it by the destination as well would leave the list holding only the value already chosen. Offering every airport regardless meant most choices led to an empty page. Two consequences worth knowing: with `type=trip` both lists come back empty - blog offers carry no IATA code - and the controls hide themselves rather than sit there empty; and a value already picked can drop out of its own list when another filter changes, so `SelectField` keeps it as an option so the filter still shows what it is doing and can be cleared.
+
+### Searching against booked leave
+
+`HolidayWindow` (`?from=&to=` on the dashboard) is leave already granted, and it is a different idea from `TravelWindow` — that one is a date an *offer* can be taken on, read off a blog. **The whole journey has to fit inside it**: a round trip is matched on `departs_at` *and* `returns_at`, a one-way on its departure alone. Leaving on the last day off is no holiday, and a cheap way out whose return lands after work starts again is the half a price-sorted list will happily hide. The bounds are whole days — leave booked for the 12th covers a flight at seven in the evening.
+
+It filters what has already been found; it does not steer the scan. Nothing outside the rolling `deals.window_days` (90) was ever collected, so a holiday further out than that finds nothing until that window is widened.
+
+**Trip dates live in `deal_travel_windows`, a row per window, not a first/last pair on the deal.** An article naming several terms is naming *alternatives* — "4 lipca" **or** "12-15 września" is two separate chances to go — and collapsing them into one span would invent a three-month trip and match leave in August that was never on offer. They are written twice on purpose: the `trip_details` JSON is what the offer shows the reader, these rows are what SQL can filter on, and one column cannot do both without picking a dialect (tests run on SQLite, the app on Postgres).
+
+**Undated trips are shown, but apart.** Only a minority of articles name their terms in the summary `BlogArticleParser` is allowed to read — 13 of 112 when this was built — so hiding the rest would bury most of the blog offers, while listing them among the matches would claim a fit nobody can stand behind. They come back in a separate `undated_trips` prop (`DealListing::$undatedTripsOnly`) under their own heading, and only once a holiday is actually asked for.
+
+A half-given or backwards range is treated as no filter at all, exactly like an unusable IATA code: the dashboard is a set of links, and a hand-edited one should show everything rather than fail.
 
 ## Running it — everything is Dockerized
 
@@ -140,6 +156,8 @@ Three generated-code mechanisms matter more than the file tree here:
 The starter kit's sidebar panel is gone — sidebar, breadcrumbs, `AppShell`/`AppContent` and the auth/settings leftovers were deleted. `AppLayout` is a sticky header (`AppHeader`, with the brand mark and the light/dark switch) over a single full-width column, because the app has exactly one screen and nothing to navigate to.
 
 The design system lives in `resources/css/app.css` as CSS custom properties, mirrored into Tailwind through `@theme inline`. Beyond the usual shadcn tokens it defines **reserved status colours** — `good` (a bargain), `warn` (merely acceptable) — plus `track` for meter rails and the `shadow-card`/`shadow-lift` pair. Both status colours are always paired with a word or an icon, so a verdict never rests on colour alone. Two shared classes carry the rest: `.surface` (the one elevation language for cards, tiles and the header) and `.numeric` (tabular figures; large standalone numbers deliberately do without).
+
+`DealCalendar` draws a stay the way a travel agent's date picker does: the outbound day filled in one hue, the way back in another, and the days between them as a band joining the two - marking both ends alike left the middle blank, so a trip read as two unrelated dates. `leg-out`/`leg-back`/`stay` are identity, not status, which is why they are their own tokens rather than a reuse of `good`/`warn`; the pair clears the colourblind separation gate in both modes and the calendar carries a key regardless. **Dates arrive in two shapes** - a blog names a bare day, an airline an instant - and the day an instant belongs to is the local one: a flight at 22:30 UTC leaves on the 29th here, so cutting the date out of the string put a whole stay on the calendar a day early.
 
 Page-specific components sit in `resources/js/components/deals/` — `DealCard`, `StatTile`, `ScoreRing`, `Meter`, `FilterBar` and its controls, `EmptyState`. Formatting of money, dates, durations and source names is centralised in `resources/js/lib/dealFormat.ts`; **the controller sends numbers and codes, never formatted strings**, so currency and date notation are decided in one place.
 

@@ -1,2 +1,4 @@
+# A private, single-owner dashboard. There is nothing here for a search engine,
+# and no page of it is meant to be found by anyone but its owner.
 User-agent: *
-Disallow:
+Disallow: /

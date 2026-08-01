@@ -62,6 +62,19 @@
 
     --color-track: var(--track);
 
+    /*
+      The two ends of a stay and the days between them. These are identity, not
+      status - which leg a day is - so they are their own hues rather than a
+      reuse of `good`/`warn`. Blue and orange were picked for it: they clear the
+      colourblind separation gate in both modes by a wide margin (ΔE ~25), and
+      the calendar labels every one of them anyway.
+    */
+    --color-leg-out: var(--leg-out);
+    --color-leg-out-foreground: var(--leg-out-foreground);
+    --color-leg-back: var(--leg-back);
+    --color-leg-back-foreground: var(--leg-back-foreground);
+    --color-stay: var(--stay);
+
     --shadow-card: var(--shadow-card);
     --shadow-lift: var(--shadow-lift);
 }
@@ -126,6 +139,12 @@
 
     --track: oklch(0.925 0.008 258);
 
+    --leg-out: oklch(0.573 0.163 254.5);
+    --leg-out-foreground: oklch(0.99 0.002 255);
+    --leg-back: oklch(0.653 0.176 41.5);
+    --leg-back-foreground: oklch(0.99 0.002 60);
+    --stay: oklch(0.944 0.028 254);
+
     --shadow-card: 0 1px 2px oklch(0.215 0.019 261 / 0.05);
     --shadow-lift:
         0 10px 30px -12px oklch(0.215 0.019 261 / 0.18),
@@ -165,6 +184,12 @@
     --warn-foreground: oklch(0.88 0.11 84);
 
     --track: oklch(0.3 0.015 259);
+
+    --leg-out: oklch(0.633 0.157 254.4);
+    --leg-out-foreground: oklch(0.14 0.02 259);
+    --leg-back: oklch(0.603 0.171 39.5);
+    --leg-back-foreground: oklch(0.99 0.002 60);
+    --stay: oklch(0.313 0.045 256);
 
     --shadow-card: 0 1px 2px oklch(0 0 0 / 0.4);
     --shadow-lift:
