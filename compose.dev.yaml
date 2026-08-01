@@ -1,0 +1,52 @@
+# Local development overlay:
+#   docker compose -f compose.yaml -f compose.dev.yaml up
+#
+# Source is bind-mounted, so PHP changes are live and Vite serves assets with
+# HMR. Vite is bound to 127.0.0.1 only, same rule as the other tooling.
+
+x-dev: &dev
+  image: travel/app:dev
+  build:
+    context: .
+    target: dev
+  env_file: .env
+  volumes:
+    - .:/var/www/html
+    - /var/www/html/node_modules
+  networks:
+    - edge
+    - backend
+
+services:
+  app:
+    <<: *dev
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      "php artisan migrate --force &&
+       php artisan config:clear &&
+       php artisan serve --host=0.0.0.0 --port=80"
+    environment:
+      CONTAINER_ROLE: app
+
+  worker:
+    <<: *dev
+    entrypoint: ["/bin/sh", "-c"]
+    command: "php artisan queue:listen --queue=high,default --tries=3"
+    environment:
+      CONTAINER_ROLE: worker
+
+  scheduler:
+    <<: *dev
+    entrypoint: ["/bin/sh", "-c"]
+    command: "php artisan schedule:work"
+    environment:
+      CONTAINER_ROLE: scheduler
+
+  vite:
+    <<: *dev
+    entrypoint: ["/bin/sh", "-c"]
+    command: "npm install --no-audit --no-fund && npm run dev -- --host 0.0.0.0"
+    ports:
+      - "127.0.0.1:5173:5173"
+    depends_on:
+      - app

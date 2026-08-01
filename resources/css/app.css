@@ -1,0 +1,198 @@
+@import 'tailwindcss';
+
+@import 'tw-animate-css';
+
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../storage/framework/views/*.php';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --font-sans:
+        Instrument Sans, ui-sans-serif, system-ui, sans-serif,
+        'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+        'Noto Color Emoji';
+
+    --radius-lg: var(--radius);
+    --radius-md: calc(var(--radius) - 4px);
+    --radius-sm: calc(var(--radius) - 6px);
+    --radius-xl: calc(var(--radius) + 4px);
+    --radius-2xl: calc(var(--radius) + 8px);
+
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+
+    --color-card: var(--card);
+    --color-card-foreground: var(--card-foreground);
+
+    --color-popover: var(--popover);
+    --color-popover-foreground: var(--popover-foreground);
+
+    --color-primary: var(--primary);
+    --color-primary-foreground: var(--primary-foreground);
+
+    --color-secondary: var(--secondary);
+    --color-secondary-foreground: var(--secondary-foreground);
+
+    --color-muted: var(--muted);
+    --color-muted-foreground: var(--muted-foreground);
+
+    --color-accent: var(--accent);
+    --color-accent-foreground: var(--accent-foreground);
+
+    --color-destructive: var(--destructive);
+    --color-destructive-foreground: var(--destructive-foreground);
+
+    --color-border: var(--border);
+    --color-input: var(--input);
+    --color-ring: var(--ring);
+
+    /*
+      Status colours are reserved: `good` marks a bargain, `warn` an offer that
+      is merely acceptable. They are never reused as decoration, and every place
+      that uses them also carries a word or an icon, so the state never rests on
+      colour alone.
+    */
+    --color-good: var(--good);
+    --color-good-soft: var(--good-soft);
+    --color-good-foreground: var(--good-foreground);
+    --color-warn: var(--warn);
+    --color-warn-soft: var(--warn-soft);
+    --color-warn-foreground: var(--warn-foreground);
+
+    --color-track: var(--track);
+
+    --shadow-card: var(--shadow-card);
+    --shadow-lift: var(--shadow-lift);
+}
+
+/*
+  The default border color has changed to `currentColor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+    *,
+    ::after,
+    ::before,
+    ::backdrop,
+    ::file-selector-button {
+        border-color: var(--color-border, currentColor);
+    }
+}
+
+@layer utilities {
+    body,
+    html {
+        --font-sans:
+            'Instrument Sans', ui-sans-serif, system-ui, sans-serif,
+            'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+            'Noto Color Emoji';
+    }
+}
+
+:root {
+    color-scheme: light;
+
+    --background: oklch(0.985 0.003 255);
+    --foreground: oklch(0.215 0.019 261);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.215 0.019 261);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.215 0.019 261);
+    --primary: oklch(0.573 0.163 254.5);
+    --primary-foreground: oklch(0.99 0.002 255);
+    --secondary: oklch(0.958 0.006 258);
+    --secondary-foreground: oklch(0.33 0.021 261);
+    --muted: oklch(0.963 0.005 258);
+    --muted-foreground: oklch(0.535 0.021 259);
+    --accent: oklch(0.955 0.012 255);
+    --accent-foreground: oklch(0.34 0.03 258);
+    --destructive: oklch(0.617 0.196 26);
+    --destructive-foreground: oklch(0.99 0.002 255);
+    --border: oklch(0.916 0.007 258);
+    --input: oklch(0.916 0.007 258);
+    --ring: oklch(0.573 0.163 254.5);
+
+    --good: oklch(0.567 0.121 165.5);
+    --good-soft: oklch(0.955 0.033 165);
+    --good-foreground: oklch(0.38 0.09 166);
+    --warn: oklch(0.658 0.137 76);
+    --warn-soft: oklch(0.96 0.045 85);
+    --warn-foreground: oklch(0.46 0.1 72);
+
+    --track: oklch(0.925 0.008 258);
+
+    --shadow-card: 0 1px 2px oklch(0.215 0.019 261 / 0.05);
+    --shadow-lift:
+        0 10px 30px -12px oklch(0.215 0.019 261 / 0.18),
+        0 2px 6px -2px oklch(0.215 0.019 261 / 0.06);
+
+    --radius: 0.75rem;
+}
+
+.dark {
+    color-scheme: dark;
+
+    --background: oklch(0.171 0.012 259);
+    --foreground: oklch(0.965 0.004 255);
+    --card: oklch(0.214 0.014 259);
+    --card-foreground: oklch(0.965 0.004 255);
+    --popover: oklch(0.214 0.014 259);
+    --popover-foreground: oklch(0.965 0.004 255);
+    --primary: oklch(0.633 0.157 254.4);
+    --primary-foreground: oklch(0.14 0.02 259);
+    --secondary: oklch(0.262 0.016 259);
+    --secondary-foreground: oklch(0.94 0.005 255);
+    --muted: oklch(0.253 0.015 259);
+    --muted-foreground: oklch(0.7 0.017 259);
+    --accent: oklch(0.278 0.02 258);
+    --accent-foreground: oklch(0.95 0.005 255);
+    --destructive: oklch(0.665 0.166 21);
+    --destructive-foreground: oklch(0.14 0.02 259);
+    --border: oklch(0.283 0.015 259);
+    --input: oklch(0.3 0.016 259);
+    --ring: oklch(0.633 0.157 254.4);
+
+    --good: oklch(0.7 0.132 166);
+    --good-soft: oklch(0.31 0.048 168);
+    --good-foreground: oklch(0.86 0.11 168);
+    --warn: oklch(0.78 0.142 80);
+    --warn-soft: oklch(0.32 0.05 80);
+    --warn-foreground: oklch(0.88 0.11 84);
+
+    --track: oklch(0.3 0.015 259);
+
+    --shadow-card: 0 1px 2px oklch(0 0 0 / 0.4);
+    --shadow-lift:
+        0 12px 32px -12px oklch(0 0 0 / 0.65), 0 2px 6px -2px oklch(0 0 0 / 0.4);
+}
+
+@layer base {
+    * {
+        @apply border-border outline-ring/50;
+    }
+
+    body {
+        @apply bg-background text-foreground;
+    }
+
+    /* Deals are read as columns of numbers everywhere but the hero figure. */
+    .numeric {
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.01em;
+    }
+}
+
+@layer components {
+    /*
+      One elevation language for every raised surface, so cards, the header and
+      the filter bar read as the same material.
+    */
+    .surface {
+        @apply rounded-2xl border border-border bg-card shadow-card;
+    }
+}
