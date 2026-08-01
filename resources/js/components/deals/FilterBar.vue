@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { CalendarHeart, Flame } from '@lucide/vue';
 import FilterChip from '@/components/deals/FilterChip.vue';
+import HolidayField from '@/components/deals/HolidayField.vue';
 import SegmentedControl from '@/components/deals/SegmentedControl.vue';
 import SelectField from '@/components/deals/SelectField.vue';
 import type {
@@ -97,6 +98,12 @@ const toggleWeekends = () =>
                 label="Mega okazje"
                 tone="good"
                 @toggle="emit('change', { steals: !filters.steals })"
+            />
+
+            <HolidayField
+                :from="filters.from"
+                :to="filters.to"
+                @change="emit('change', $event)"
             />
 
             <div class="flex flex-wrap items-center gap-3">

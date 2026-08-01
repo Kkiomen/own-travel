@@ -14,7 +14,9 @@ use App\Domain\Deal\Service\Steal;
 use App\Domain\Deal\ValueObject\Airport;
 use App\Domain\Deal\ValueObject\DealListing;
 use App\Domain\Deal\ValueObject\DealSummary;
+use App\Domain\Deal\ValueObject\HolidayWindow;
 use App\Domain\Deal\ValueObject\TravelWindow;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Date;
 use Inertia\Inertia;
@@ -35,6 +37,7 @@ final class DealController extends Controller
         $destination = $this->airport($request->query('destination'));
         $weekendsOnly = $request->boolean('weekends');
         $stealsOnly = $request->boolean('steals');
+        $holiday = $this->holiday($request->query('from'), $request->query('to'));
 
         $listing = new DealListing(
             limit: (int) config('deals.dashboard_limit', 60),
@@ -46,10 +49,13 @@ final class DealController extends Controller
             origin: $origin,
             destination: $destination,
             preferredOrigin: $this->airport(config('deals.preferred_origin')),
+            holiday: $holiday,
         );
 
         $summary = $deals->summarise($now);
-        $airports = $deals->availableAirports($now);
+        // The airport lists answer to the filters already chosen, so "Dokąd"
+        // offers where this origin actually flies rather than every airport.
+        $airports = $deals->availableAirports($listing);
 
         return Inertia::render('Dashboard', [
             'deals' => array_map($this->present(...), $deals->list($listing)),
@@ -59,6 +65,9 @@ final class DealController extends Controller
             'steals' => $stealsOnly,
             'origin' => $origin?->iataCode,
             'destination' => $destination?->iataCode,
+            'from' => $holiday?->from->toDateString(),
+            'to' => $holiday?->to->toDateString(),
+            'undated_trips' => array_map($this->present(...), $this->undatedTrips($deals, $listing)),
             'airports' => [
                 'origins' => array_map($this->presentAirport(...), $airports['origins']),
                 'destinations' => array_map($this->presentAirport(...), $airports['destinations']),
@@ -76,6 +85,50 @@ final class DealController extends Controller
             ],
             'currency' => (string) config('deals.currency', 'PLN'),
         ]);
+    }
+
+    /**
+     * The leave being searched against, if both ends were given and make
+     * sense. A half-filled or nonsensical range is no filter at all, exactly
+     * like an unusable airport code - the dashboard is a set of links, and a
+     * mistyped one should show everything rather than fail.
+     */
+    private function holiday(mixed $from, mixed $to): ?HolidayWindow
+    {
+        if (! is_string($from) || ! is_string($to)) {
+            return null;
+        }
+
+        try {
+            return new HolidayWindow(
+                CarbonImmutable::createFromFormat('Y-m-d', $from)->startOfDay(),
+                CarbonImmutable::createFromFormat('Y-m-d', $to)->startOfDay(),
+            );
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * Blog offers whose article never named a date. Without a holiday to match
+     * them against there is nothing to set them apart, so they are only asked
+     * for once a search is actually narrowed to a window.
+     *
+     * @return list<Deal>
+     */
+    private function undatedTrips(DealRepository $deals, DealListing $listing): array
+    {
+        if (! $listing->holiday instanceof HolidayWindow) {
+            return [];
+        }
+
+        return $deals->list(new DealListing(
+            limit: $listing->limit,
+            sort: $listing->sort,
+            now: $listing->now,
+            stealsOnly: $listing->stealsOnly,
+            undatedTripsOnly: true,
+        ));
     }
 
     /**

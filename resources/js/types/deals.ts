@@ -62,6 +62,9 @@ export type DealFilters = {
     steals: boolean;
     origin: string;
     destination: string;
+    /** Booked leave, as ISO dates. Both ends or neither - one alone filters nothing. */
+    from: string;
+    to: string;
 };
 
 export type AirportOption = {

@@ -6,9 +6,11 @@ namespace Tests\Doubles;
 
 use App\Domain\Deal\Deal;
 use App\Domain\Deal\DealSort;
+use App\Domain\Deal\DealType;
 use App\Domain\Deal\Port\DealRepository;
 use App\Domain\Deal\ValueObject\DealListing;
 use App\Domain\Deal\ValueObject\DealSummary;
+use App\Domain\Deal\ValueObject\HolidayWindow;
 use Carbon\CarbonImmutable;
 
 final class InMemoryDealRepository implements DealRepository
@@ -33,13 +35,16 @@ final class InMemoryDealRepository implements DealRepository
     {
         $deals = array_values(array_filter(
             $this->deals,
-            static fn (Deal $deal): bool => ($deal->departsAt === null
+            fn (Deal $deal): bool => ($deal->departsAt === null
                 || ! $deal->departsAt->lessThan($listing->now))
                 && ($listing->type === null || $deal->type === $listing->type)
                 && (! $listing->weekendsOnly || $deal->weekendGetaway)
                 && (! $listing->stealsOnly || $deal->typicalPrice !== null)
                 && ($listing->origin === null || $deal->origin?->equals($listing->origin) === true)
-                && ($listing->destination === null || $deal->destination?->equals($listing->destination) === true),
+                && ($listing->destination === null || $deal->destination?->equals($listing->destination) === true)
+                && ($listing->undatedTripsOnly
+                    ? $this->isAnUndatedTrip($deal)
+                    : ! $listing->holiday instanceof HolidayWindow || $this->fitsTheHoliday($deal, $listing->holiday)),
         ));
 
         match ($listing->sort) {
@@ -49,6 +54,31 @@ final class InMemoryDealRepository implements DealRepository
         };
 
         return array_slice($deals, 0, $listing->limit);
+    }
+
+    /**
+     * The same rule the real one puts in SQL: a journey qualifies when it can
+     * be shown to fall inside the leave, whether it carries its dates as a
+     * departure or as the terms an article named.
+     */
+    private function fitsTheHoliday(Deal $deal, HolidayWindow $holiday): bool
+    {
+        if ($deal->departsAt !== null && $holiday->covers($deal->departsAt, $deal->returnsAt)) {
+            return true;
+        }
+
+        foreach ($deal->trip->dates ?? [] as $window) {
+            if ($holiday->covers($window->from, $window->to)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function isAnUndatedTrip(Deal $deal): bool
+    {
+        return $deal->type === DealType::Trip && ($deal->trip->dates ?? []) === [];
     }
 
     public function summarise(CarbonImmutable $now): DealSummary
@@ -72,17 +102,18 @@ final class InMemoryDealRepository implements DealRepository
         return new DealSummary($counts, $cheapest);
     }
 
-    public function availableAirports(CarbonImmutable $now): array
+    public function availableAirports(DealListing $listing): array
     {
         $origins = [];
         $destinations = [];
 
         foreach ($this->deals as $deal) {
-            if ($deal->origin !== null) {
+            // Each side ignores its own filter, exactly as the real one does.
+            if ($deal->origin !== null && $this->matches($deal, $listing, ignoringOrigin: true)) {
                 $origins[$deal->origin->iataCode] = $deal->origin;
             }
 
-            if ($deal->destination !== null) {
+            if ($deal->destination !== null && $this->matches($deal, $listing, ignoringDestination: true)) {
                 $destinations[$deal->destination->iataCode] = $deal->destination;
             }
         }
@@ -91,6 +122,37 @@ final class InMemoryDealRepository implements DealRepository
             'origins' => array_values($origins),
             'destinations' => array_values($destinations),
         ];
+    }
+
+    private function matches(
+        Deal $deal,
+        DealListing $listing,
+        bool $ignoringOrigin = false,
+        bool $ignoringDestination = false,
+    ): bool {
+        if ($deal->departsAt !== null && $deal->departsAt->lessThan($listing->now)) {
+            return false;
+        }
+
+        if ($listing->type !== null && $deal->type !== $listing->type) {
+            return false;
+        }
+
+        if ($listing->weekendsOnly && ! $deal->weekendGetaway) {
+            return false;
+        }
+
+        if (! $ignoringOrigin && $listing->origin !== null
+            && $deal->origin?->iataCode !== $listing->origin->iataCode) {
+            return false;
+        }
+
+        if (! $ignoringDestination && $listing->destination !== null
+            && $deal->destination?->iataCode !== $listing->destination->iataCode) {
+            return false;
+        }
+
+        return true;
     }
 
     public function purgeExpired(CarbonImmutable $departedBefore, CarbonImmutable $foundBefore): int

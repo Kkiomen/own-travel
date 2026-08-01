@@ -33,12 +33,17 @@ interface DealRepository
     public function summarise(CarbonImmutable $now): DealSummary;
 
     /**
-     * The airports actually on offer, so the dashboard can only ever ask for
-     * somewhere there are deals.
+     * The airports actually on offer *under the filters already chosen*, so the
+     * dashboard can only ever ask for somewhere there are deals.
+     *
+     * Each side ignores its own filter: the destinations are what can be
+     * reached from the chosen origin, and the origins are where the chosen
+     * destination can be reached from. Narrowing a list by itself would leave
+     * it holding the one value already picked.
      *
      * @return array{origins: list<Airport>, destinations: list<Airport>}
      */
-    public function availableAirports(CarbonImmutable $now): array;
+    public function availableAirports(DealListing $listing): array;
 
     /**
      * Drops flights that departed before the given moment, and anything found

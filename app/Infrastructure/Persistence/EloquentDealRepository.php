@@ -15,6 +15,7 @@ use App\Domain\Deal\ValueObject\Airport;
 use App\Domain\Deal\ValueObject\DealListing;
 use App\Domain\Deal\ValueObject\DealScore;
 use App\Domain\Deal\ValueObject\DealSummary;
+use App\Domain\Deal\ValueObject\HolidayWindow;
 use App\Domain\Deal\ValueObject\Money;
 use App\Domain\Deal\ValueObject\TravelWindow;
 use App\Domain\Deal\ValueObject\TripDetails;
@@ -32,12 +33,15 @@ final readonly class EloquentDealRepository implements DealRepository
     public function store(Deal $deal): bool
     {
         $fingerprint = $deal->fingerprint();
+        $known = DealRecord::query()->where('fingerprint', $fingerprint)->first();
 
-        if (DealRecord::query()->where('fingerprint', $fingerprint)->exists()) {
+        if ($known instanceof DealRecord) {
+            $this->fillInMissingAirportNames($known, $deal);
+
             return false;
         }
 
-        DealRecord::query()->create([
+        $record = DealRecord::query()->create([
             'fingerprint' => $fingerprint,
             'source' => $deal->source,
             'type' => $deal->type->value,
@@ -79,39 +83,65 @@ final readonly class EloquentDealRepository implements DealRepository
             'found_at' => Date::now(),
         ]);
 
+        $this->storeTravelWindows($record, $deal);
+
         return true;
+    }
+
+    /**
+     * The dates are written twice on purpose: the JSON copy is what the offer
+     * shows the reader, these rows are what a holiday search can filter on.
+     * One column cannot do both - a query cannot look inside the JSON without
+     * picking a dialect, and the tests run on SQLite while the app runs on
+     * Postgres.
+     */
+    private function storeTravelWindows(DealRecord $record, Deal $deal): void
+    {
+        $windows = $deal->trip->dates ?? [];
+
+        if ($windows === []) {
+            return;
+        }
+
+        DB::table('deal_travel_windows')->insert(array_map(
+            static fn (TravelWindow $window): array => [
+                'deal_id' => $record->id,
+                'starts_on' => $window->from->toDateString(),
+                'ends_on' => $window->to?->toDateString(),
+                'label' => $window->label,
+            ],
+            $windows,
+        ));
+    }
+
+    /**
+     * The fingerprint deliberately leaves airport names out, so the same offer
+     * found again with better names is still the same offer - and there is no
+     * reason to keep showing the poorer version. Wizz Air's timetable answers
+     * with codes alone, and until its station directory was wired up every one
+     * of its offers was stored nameless; this is what lets those rows recover
+     * on the next scan instead of waiting to expire.
+     */
+    private function fillInMissingAirportNames(DealRecord $known, Deal $deal): void
+    {
+        $better = array_filter([
+            'origin_name' => $known->origin_name === null ? $deal->origin?->name : null,
+            'destination_name' => $known->destination_name === null ? $deal->destination?->name : null,
+            'destination_country' => $known->destination_country === null ? $deal->destination?->countryName : null,
+        ], static fn (?string $value): bool => $value !== null);
+
+        if ($better !== []) {
+            $known->forceFill($better)->save();
+        }
     }
 
     public function list(DealListing $listing): array
     {
-        $query = DealRecord::query()
-            // A flight that has already left is not an offer any more.
-            ->where(function (Builder $departures) use ($listing): void {
-                $departures
-                    ->whereNull('departs_at')
-                    ->orWhere('departs_at', '>=', $listing->now);
-            })
-            ->when(
-                $listing->type instanceof DealType,
-                fn (Builder $query): Builder => $query->where('type', $listing->type?->value),
-            )
-            ->when(
-                $listing->weekendsOnly,
-                fn (Builder $query): Builder => $query->where('weekend_getaway', true),
-            )
-            ->when(
-                $listing->stealsOnly,
-                fn (Builder $query): Builder => $query->where('steal', true),
-            )
-            ->when(
-                $listing->origin instanceof Airport,
-                fn (Builder $query): Builder => $query->where('origin_iata', $listing->origin?->iataCode),
-            )
-            ->when(
-                $listing->destination instanceof Airport,
-                fn (Builder $query): Builder => $query->where('destination_iata', $listing->destination?->iataCode),
-            )
-            ->limit($listing->limit);
+        $query = DealRecord::query();
+
+        $this->onlyWhatIsAskedFor($query, $listing);
+
+        $query->limit($listing->limit);
 
         // The home airport comes first whatever the ordering - it is the one
         // that can be reached without a trip to the airport first.
@@ -159,33 +189,132 @@ final readonly class EloquentDealRepository implements DealRepository
         return new DealSummary($counts, $cheapest);
     }
 
-    public function availableAirports(CarbonImmutable $now): array
+    public function availableAirports(DealListing $listing): array
     {
         return [
-            'origins' => $this->airportsIn('origin_iata', $now),
-            'destinations' => $this->airportsIn('destination_iata', $now),
+            'origins' => $this->airportsIn('origin_iata', $listing),
+            'destinations' => $this->airportsIn('destination_iata', $listing),
         ];
+    }
+
+    /**
+     * The filters the dashboard is looking through. The listing and the lists
+     * of airports it offers run through the same ones, so the two can never
+     * disagree about what is on offer.
+     *
+     * @param  Builder<DealRecord>|QueryBuilder  $query
+     * @param  'origin_iata'|'destination_iata'|null  $ignoring  the filter a facet must not narrow itself by
+     */
+    private function onlyWhatIsAskedFor(
+        Builder|QueryBuilder $query,
+        DealListing $listing,
+        ?string $ignoring = null,
+    ): void {
+        // A flight that has already left is not an offer any more. Written flat
+        // rather than as a nested group so the one method serves both builders.
+        $query->whereRaw('(departs_at is null or departs_at >= ?)', [$listing->now]);
+
+        if ($listing->type instanceof DealType) {
+            $query->where('type', $listing->type->value);
+        }
+
+        if ($listing->weekendsOnly) {
+            $query->where('weekend_getaway', true);
+        }
+
+        if ($listing->stealsOnly) {
+            $query->where('steal', true);
+        }
+
+        if ($listing->origin instanceof Airport && $ignoring !== 'origin_iata') {
+            $query->where('origin_iata', $listing->origin->iataCode);
+        }
+
+        if ($listing->destination instanceof Airport && $ignoring !== 'destination_iata') {
+            $query->where('destination_iata', $listing->destination->iataCode);
+        }
+
+        if ($listing->undatedTripsOnly) {
+            $this->onlyTripsNobodyDated($query);
+
+            return;
+        }
+
+        if ($listing->holiday instanceof HolidayWindow) {
+            $this->onlyWhatFitsTheHoliday($query, $listing->holiday);
+        }
+    }
+
+    /**
+     * Whatever can be shown to fall inside the leave, whichever way it carries
+     * its dates: a flight has a departure and possibly a return, a blog offer
+     * has the terms the article named. An offer with neither cannot qualify.
+     *
+     * The whole journey has to fit. Leaving on the last day off is no holiday,
+     * and coming back after work has started again is not bookable.
+     *
+     * @param  Builder<DealRecord>|QueryBuilder  $query
+     */
+    private function onlyWhatFitsTheHoliday(Builder|QueryBuilder $query, HolidayWindow $holiday): void
+    {
+        $windows = $this->travelWindowsOfTheDeal()->whereRaw(
+            'starts_on >= ? and coalesce(ends_on, starts_on) <= ?',
+            [$holiday->from->toDateString(), $holiday->to->toDateString()],
+        );
+
+        $query->where(function (Builder|QueryBuilder $fits) use ($holiday, $windows): void {
+            $fits
+                ->whereRaw(
+                    'departs_at is not null and departs_at >= ? and coalesce(returns_at, departs_at) <= ?',
+                    [$holiday->from, $holiday->to],
+                )
+                ->orWhereExists($windows);
+        });
+    }
+
+    /**
+     * Trips the article never dated. They are not matches - nothing about them
+     * can be matched - but hiding them would bury most of the blog offers,
+     * because only a minority of articles name their terms in the summary the
+     * parser is allowed to read.
+     *
+     * @param  Builder<DealRecord>|QueryBuilder  $query
+     */
+    private function onlyTripsNobodyDated(Builder|QueryBuilder $query): void
+    {
+        $query
+            ->where('type', DealType::Trip->value)
+            ->whereNotExists($this->travelWindowsOfTheDeal());
+    }
+
+    /**
+     * The dates belonging to the deal the outer query is looking at.
+     */
+    private function travelWindowsOfTheDeal(): QueryBuilder
+    {
+        return DB::table('deal_travel_windows')
+            ->selectRaw('1')
+            ->whereColumn('deal_travel_windows.deal_id', 'deals.id');
     }
 
     /**
      * @param  'origin_iata'|'destination_iata'  $codeColumn
      * @return list<Airport>
      */
-    private function airportsIn(string $codeColumn, CarbonImmutable $now): array
+    private function airportsIn(string $codeColumn, DealListing $listing): array
     {
         $selection = match ($codeColumn) {
             'origin_iata' => 'origin_iata as code, min(origin_name) as name',
             'destination_iata' => 'destination_iata as code, min(destination_name) as name',
         };
 
-        $rows = DB::table('deals')
+        $query = DB::table('deals')
             ->selectRaw($selection)
-            ->whereNotNull($codeColumn)
-            ->where(function (QueryBuilder $departures) use ($now): void {
-                $departures
-                    ->whereNull('departs_at')
-                    ->orWhere('departs_at', '>=', $now);
-            })
+            ->whereNotNull($codeColumn);
+
+        $this->onlyWhatIsAskedFor($query, $listing, $codeColumn);
+
+        $rows = $query
             ->groupBy($codeColumn)
             ->orderBy('name')
             ->get();

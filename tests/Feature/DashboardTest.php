@@ -163,6 +163,23 @@ final class DashboardTest extends TestCase
         $this->assertSame('score', $page['props']['sort']);
     }
 
+    public function test_the_destinations_offered_are_the_ones_the_chosen_origin_flies_to(): void
+    {
+        $this->repository()->store($this->flight(99, origin: 'WRO', destination: 'BGY'));
+        $this->repository()->store($this->flight(120, origin: 'KRK', destination: 'AGP'));
+
+        $airports = $this->inertiaProps(
+            $this->get(route('dashboard', ['origin' => 'WRO']))->assertOk(),
+        )['airports'];
+
+        $codes = array_column($airports['destinations'], 'code');
+
+        // Picking Wrocław and then being offered Malaga - which only flies from
+        // Kraków - is a choice that can only return an empty page.
+        $this->assertSame(['BGY'], $codes);
+        $this->assertSame(['KRK', 'WRO'], array_column($airports['origins'], 'code'));
+    }
+
     public function test_it_hides_flights_that_have_already_departed(): void
     {
         $this->repository()->store($this->flight(99, departsAt: '2026-07-20 06:00'));
@@ -207,15 +224,20 @@ final class DashboardTest extends TestCase
         )->scoredWith(new DealScore($score, Money::fromDecimal($totalPrice, 'PLN'), ScoreBasis::TotalPrice));
     }
 
-    private function flight(float $price, string $departsAt = '2026-10-30 21:00', int $score = 80): Deal
-    {
+    private function flight(
+        float $price,
+        string $departsAt = '2026-10-30 21:00',
+        int $score = 80,
+        string $origin = 'KRK',
+        string $destination = 'AGP',
+    ): Deal {
         return Deal::flight(
             source: 'ryanair',
-            title: 'Kraków → Malaga',
+            title: $origin.' → '.$destination,
             price: Money::fromDecimal($price, 'PLN'),
-            url: 'https://example.test/'.$price,
-            origin: Airport::fromIataCode('KRK', 'Kraków', 'Polska'),
-            destination: Airport::fromIataCode('AGP', 'Malaga', 'Hiszpania'),
+            url: 'https://example.test/'.$origin.$destination.$price,
+            origin: Airport::fromIataCode($origin, 'Kraków', 'Polska'),
+            destination: Airport::fromIataCode($destination, 'Malaga', 'Hiszpania'),
             departsAt: CarbonImmutable::parse($departsAt),
         )->scoredWith(new DealScore($score, Money::fromDecimal($price, 'PLN'), ScoreBasis::TotalPrice));
     }

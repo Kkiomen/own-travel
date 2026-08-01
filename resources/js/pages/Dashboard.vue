@@ -21,12 +21,16 @@ import type {
 
 const props = defineProps<{
     deals: Deal[];
+    /** Blog offers whose article never named a term - only sent with a holiday. */
+    undated_trips: Deal[];
     sort: DealSort;
     type: DealType | null;
     weekends: boolean;
     steals: boolean;
     origin: string | null;
     destination: string | null;
+    from: string | null;
+    to: string | null;
     airports: AirportOptions;
     totals: DealTotals;
     thresholds: DealThresholds;
@@ -40,7 +44,29 @@ const filters = computed<DealFilters>(() => ({
     steals: props.steals,
     origin: props.origin ?? '',
     destination: props.destination ?? '',
+    from: props.from ?? '',
+    to: props.to ?? '',
 }));
+
+const holiday = computed(() =>
+    props.from === null || props.to === null
+        ? null
+        : { from: props.from, to: props.to },
+);
+
+const holidayLabel = computed(() => {
+    if (holiday.value === null) {
+        return '';
+    }
+
+    const day = (iso: string) =>
+        new Date(iso).toLocaleDateString('pl-PL', {
+            day: 'numeric',
+            month: 'long',
+        });
+
+    return `${day(holiday.value.from)} – ${day(holiday.value.to)}`;
+});
 
 /** The deal whose details are open, if any. */
 const openDeal = ref<Deal | null>(null);
@@ -51,7 +77,8 @@ const isFiltered = computed(
         filters.value.weekends ||
         filters.value.steals ||
         filters.value.origin !== '' ||
-        filters.value.destination !== '',
+        filters.value.destination !== '' ||
+        holiday.value !== null,
 );
 
 /**
@@ -71,6 +98,9 @@ const apply = (changes: Partial<DealFilters>) => {
             steals: next.steals ? 1 : undefined,
             origin: next.origin === '' ? undefined : next.origin,
             destination: next.destination === '' ? undefined : next.destination,
+            // One end alone narrows nothing, so it is not worth a round trip.
+            from: next.from !== '' && next.to !== '' ? next.from : undefined,
+            to: next.from !== '' && next.to !== '' ? next.to : undefined,
         },
         { preserveState: true, preserveScroll: true, replace: true },
     );
@@ -83,6 +113,8 @@ const clearFilters = () =>
         steals: false,
         origin: '',
         destination: '',
+        from: '',
+        to: '',
     });
 
 const tiles = computed(() => [
@@ -180,6 +212,14 @@ const cheapestOverall = computed(() => {
         />
 
         <section class="py-6">
+            <h2
+                v-if="holiday !== null"
+                class="mb-4 text-sm font-medium text-muted-foreground"
+            >
+                Mieszczą się w urlopie
+                <span class="text-foreground">{{ holidayLabel }}</span>
+            </h2>
+
             <EmptyState
                 v-if="deals.length === 0"
                 :filtered="isFiltered"
@@ -191,6 +231,41 @@ const cheapestOverall = computed(() => {
                 class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"
             >
                 <li v-for="deal in deals" :key="deal.id" class="flex">
+                    <DealCard
+                        :deal="deal"
+                        :score-threshold="thresholds.score"
+                        class="w-full"
+                        @open="openDeal = deal"
+                    />
+                </li>
+            </ul>
+        </section>
+
+        <!--
+            Kept apart on purpose: most blog articles never name their terms in
+            the summary the parser is allowed to read, so hiding these would
+            bury the majority of the trips - but listing them above would claim
+            a match nobody can stand behind.
+        -->
+        <section
+            v-if="undated_trips.length > 0"
+            class="border-t border-border/70 py-6"
+        >
+            <h2 class="text-sm font-medium text-muted-foreground">
+                Termin nieznany
+                <span class="text-foreground/70"
+                    >– sprawdź na stronie oferty</span
+                >
+            </h2>
+            <p class="mt-1 mb-4 text-sm text-muted-foreground">
+                Te wycieczki nie podają terminu w zapowiedzi, więc nie da się
+                stwierdzić, czy pasują do Twojego urlopu.
+            </p>
+
+            <ul
+                class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"
+            >
+                <li v-for="deal in undated_trips" :key="deal.id" class="flex">
                     <DealCard
                         :deal="deal"
                         :score-threshold="thresholds.score"

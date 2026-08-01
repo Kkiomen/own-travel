@@ -210,17 +210,77 @@ final class EloquentDealRepositoryTest extends TestCase
         $this->repository->store($this->flight(89, origin: 'KRK', destination: 'BGY'));
         $this->repository->store($this->flight(79, origin: 'WRO', destination: 'TRF', departsAt: '2026-07-01 06:00'));
 
-        $airports = $this->repository->availableAirports($this->now);
-
-        $origins = array_map(static fn (Airport $a): string => $a->iataCode, $airports['origins']);
-        $destinations = array_map(static fn (Airport $a): string => $a->iataCode, $airports['destinations']);
-
-        sort($origins);
-        sort($destinations);
+        $airports = $this->airports(new DealListing(10, DealSort::Price, $this->now));
 
         // TRF only appears on a flight that has already departed.
-        $this->assertSame(['KRK', 'WRO'], $origins);
-        $this->assertSame(['BGY'], $destinations);
+        $this->assertSame(['KRK', 'WRO'], $airports['origins']);
+        $this->assertSame(['BGY'], $airports['destinations']);
+    }
+
+    public function test_the_destinations_are_the_ones_reachable_from_the_chosen_origin(): void
+    {
+        $this->repository->store($this->flight(99, origin: 'WRO', destination: 'BGY'));
+        $this->repository->store($this->flight(89, origin: 'WRO', destination: 'TRF'));
+        $this->repository->store($this->flight(79, origin: 'KRK', destination: 'AGP'));
+
+        $airports = $this->airports(new DealListing(
+            10,
+            DealSort::Price,
+            $this->now,
+            origin: Airport::fromIataCode('WRO'),
+        ));
+
+        // Malaga is only reachable from Kraków, so offering it here would be a
+        // choice that returns nothing.
+        $this->assertSame(['BGY', 'TRF'], $airports['destinations']);
+
+        // The origins keep every airport: narrowing that list by the origin
+        // already chosen would leave it holding only that one.
+        $this->assertSame(['KRK', 'WRO'], $airports['origins']);
+    }
+
+    public function test_the_airports_answer_to_the_other_filters_too(): void
+    {
+        $this->repository->store($this->roundTrip(250, true, 'https://example.test/bgy', destination: 'BGY'));
+        $this->repository->store($this->roundTrip(260, false, 'https://example.test/trf', destination: 'TRF'));
+        $this->repository->store($this->flight(99, origin: 'WRO', destination: 'AGP'));
+
+        $airports = $this->airports(new DealListing(
+            10,
+            DealSort::Price,
+            $this->now,
+            type: DealType::RoundTrip,
+            weekendsOnly: true,
+        ));
+
+        $this->assertSame(['BGY'], $airports['destinations']);
+        $this->assertSame(['WRO'], $airports['origins']);
+    }
+
+    public function test_finding_a_known_offer_again_fills_in_the_names_it_was_missing(): void
+    {
+        // Wizz Air's timetable answers with codes alone, so its offers were
+        // stored nameless until its station directory was wired up.
+        $this->repository->store($this->flight(99, origin: 'WAW', destination: 'LTN', named: false));
+
+        $found = $this->repository->store($this->flight(99, origin: 'WAW', destination: 'LTN'));
+
+        // Still the same offer - the fingerprint leaves names out on purpose -
+        // but there is no reason to keep showing the poorer version.
+        $this->assertFalse($found);
+
+        $listed = $this->list()[0];
+        $this->assertSame('Warszawa', $listed->origin?->label());
+        $this->assertSame('Londyn-Luton', $listed->destination?->label());
+        $this->assertSame('Wielka Brytania', $listed->destination?->countryName);
+    }
+
+    public function test_a_name_already_known_is_not_replaced(): void
+    {
+        $this->repository->store($this->flight(99, origin: 'WAW', destination: 'LTN'));
+        $this->repository->store($this->flight(99, origin: 'WAW', destination: 'LTN', named: false));
+
+        $this->assertSame('Londyn-Luton', $this->list()[0]->destination?->label());
     }
 
     public function test_it_honours_the_limit(): void
@@ -264,33 +324,66 @@ final class EloquentDealRepositoryTest extends TestCase
         return $this->repository->list(new DealListing($limit, $sort, $this->now));
     }
 
+    /**
+     * @return array{origins: list<string>, destinations: list<string>}
+     */
+    private function airports(DealListing $listing): array
+    {
+        $airports = $this->repository->availableAirports($listing);
+
+        $codes = static function (array $found): array {
+            $codes = array_map(static fn (Airport $a): string => $a->iataCode, $found);
+            sort($codes);
+
+            return $codes;
+        };
+
+        return [
+            'origins' => $codes($airports['origins']),
+            'destinations' => $codes($airports['destinations']),
+        ];
+    }
+
     private function flight(
         float $price,
         string $departsAt = '2026-10-30 21:00',
         int $score = 80,
         string $origin = 'KRK',
         string $destination = 'AGP',
+        bool $named = true,
     ): Deal {
+        $names = ['KRK' => ['Kraków', 'Polska'], 'AGP' => ['Malaga', 'Hiszpania'],
+            'WAW' => ['Warszawa', 'Polska'], 'LTN' => ['Londyn-Luton', 'Wielka Brytania']];
+
         return Deal::flight(
             source: 'ryanair',
             title: $origin.' → '.$destination,
             price: Money::fromDecimal($price, 'PLN'),
             url: 'https://example.test/'.$origin.$destination.$price,
-            origin: Airport::fromIataCode($origin, 'Kraków', 'Polska'),
-            destination: Airport::fromIataCode($destination, 'Malaga', 'Hiszpania'),
+            origin: $named
+                ? Airport::fromIataCode($origin, ...($names[$origin] ?? []))
+                : Airport::fromIataCode($origin),
+            destination: $named
+                ? Airport::fromIataCode($destination, ...($names[$destination] ?? []))
+                : Airport::fromIataCode($destination),
             departsAt: CarbonImmutable::parse($departsAt),
         )->scoredWith(new DealScore($score, Money::fromDecimal($price, 'PLN'), ScoreBasis::TotalPrice));
     }
 
-    private function roundTrip(float $totalPrice, bool $weekend, string $url): Deal
-    {
+    private function roundTrip(
+        float $totalPrice,
+        bool $weekend,
+        string $url,
+        string $origin = 'WRO',
+        string $destination = 'BGY',
+    ): Deal {
         return Deal::roundTrip(
             source: 'ryanair-return',
-            title: 'Wrocław ⇄ Mediolan',
+            title: $origin.' ⇄ '.$destination,
             totalPrice: Money::fromDecimal($totalPrice, 'PLN'),
             url: $url,
-            origin: Airport::fromIataCode('WRO'),
-            destination: Airport::fromIataCode('BGY'),
+            origin: Airport::fromIataCode($origin),
+            destination: Airport::fromIataCode($destination),
             departsAt: CarbonImmutable::parse('2026-09-11 18:30'),
             returnsAt: CarbonImmutable::parse('2026-09-13 20:00'),
         )->markedAsWeekendGetaway($weekend);
