@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { CalendarRange, X } from '@lucide/vue';
-import { computed, useId } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 const props = defineProps<{
     /** ISO dates, empty when that end has not been picked yet. */
@@ -10,30 +10,68 @@ const props = defineProps<{
 
 const emit = defineEmits<{ change: [dates: { from: string; to: string }] }>();
 
-const fromId = useId();
-const toId = useId();
-
-const isSet = computed(() => props.from !== '' && props.to !== '');
-
 /**
- * Only a full range narrows anything, so a half-filled control is not an error
- * - it is a range still being typed. Leave that ends before it starts is,
- * though, and the server would drop it silently; saying so here is kinder than
- * a page that quietly ignores what was asked.
+ * The range being typed, which is not the same thing as the range being
+ * filtered by. Only a whole range narrows anything, so the server is told
+ * nothing until both ends are known - and until it is told, the props stay
+ * empty. Reading the first day back off them would drop it the moment the
+ * second was picked, which is why this has to be held here.
  */
-const isBackwards = computed(
-    () => props.from !== '' && props.to !== '' && props.to < props.from,
+const draft = ref({ from: props.from, to: props.to });
+
+// Whatever the server settled on wins, including a range it refused.
+watch(
+    () => [props.from, props.to],
+    ([from, to]) => {
+        draft.value = { from, to };
+    },
 );
 
-const setFrom = (value: string) => {
-    // Picking a start past the existing end would only ever mean the range is
-    // being moved, so the end follows rather than turning the range backwards.
-    const to = props.to !== '' && props.to < value ? value : props.to;
+const isSet = computed(() => draft.value.from !== '' && draft.value.to !== '');
 
-    emit('change', { from: value, to });
+/**
+ * One day picked is enough to want it gone again: a half-typed range is not
+ * filtering anything, and without this the only way back out is the native
+ * picker.
+ */
+const hasAnyDay = computed(
+    () => draft.value.from !== '' || draft.value.to !== '',
+);
+
+const submit = () => {
+    // Both ends, or neither: a half-filled range is one still being typed, and
+    // asking for it would only clear the filter.
+    if (isSet.value || (draft.value.from === '' && draft.value.to === '')) {
+        emit('change', { ...draft.value });
+    }
 };
 
-const clear = () => emit('change', { from: '', to: '' });
+const setFrom = (value: string) => {
+    // Picking a start past the existing end can only mean the range is being
+    // moved, never that it should run backwards.
+    const to =
+        draft.value.to !== '' && draft.value.to < value
+            ? value
+            : draft.value.to;
+
+    draft.value = { from: value, to };
+    submit();
+};
+
+const setTo = (value: string) => {
+    draft.value = { ...draft.value, to: value };
+    submit();
+};
+
+const clear = () => {
+    draft.value = { from: '', to: '' };
+
+    // Only worth a round trip if a holiday is actually being filtered by;
+    // dropping a half-typed range changes nothing the server knows about.
+    if (props.from !== '' || props.to !== '') {
+        emit('change', { from: '', to: '' });
+    }
+};
 </script>
 
 <template>
@@ -42,37 +80,34 @@ const clear = () => emit('change', { from: '', to: '' });
             class="size-4 shrink-0 text-muted-foreground"
             aria-hidden="true"
         />
-        <label :for="fromId" class="text-sm text-muted-foreground">Urlop</label>
+        <span class="text-sm text-muted-foreground">Urlop</span>
 
         <div class="flex items-center gap-1.5">
             <input
-                :id="fromId"
                 type="date"
-                :value="from"
+                :value="draft.from"
                 aria-label="Pierwszy dzień urlopu"
                 class="rounded-full border border-border bg-card px-3 py-2 text-sm transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                :class="from === '' ? 'text-muted-foreground' : 'font-medium'"
+                :class="
+                    draft.from === '' ? 'text-muted-foreground' : 'font-medium'
+                "
                 @change="setFrom(($event.target as HTMLInputElement).value)"
             />
             <span class="text-sm text-muted-foreground">–</span>
             <input
-                :id="toId"
                 type="date"
-                :value="to"
-                :min="from === '' ? undefined : from"
+                :value="draft.to"
+                :min="draft.from === '' ? undefined : draft.from"
                 aria-label="Ostatni dzień urlopu"
                 class="rounded-full border border-border bg-card px-3 py-2 text-sm transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                :class="to === '' ? 'text-muted-foreground' : 'font-medium'"
-                @change="
-                    emit('change', {
-                        from,
-                        to: ($event.target as HTMLInputElement).value,
-                    })
+                :class="
+                    draft.to === '' ? 'text-muted-foreground' : 'font-medium'
                 "
+                @change="setTo(($event.target as HTMLInputElement).value)"
             />
 
             <button
-                v-if="isSet"
+                v-if="hasAnyDay"
                 type="button"
                 aria-label="Wyczyść urlop"
                 class="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
@@ -81,9 +116,5 @@ const clear = () => emit('change', { from: '', to: '' });
                 <X class="size-3.5" aria-hidden="true" />
             </button>
         </div>
-
-        <p v-if="isBackwards" class="text-sm text-destructive">
-            Koniec urlopu wypada przed początkiem.
-        </p>
     </div>
 </template>
