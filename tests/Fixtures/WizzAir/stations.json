@@ -1,0 +1,68 @@
+{
+    "cities": [
+        {
+            "iata": "TIA",
+            "shortName": "Tirana",
+            "countryName": "Albania",
+            "countryCode": "AL",
+            "latitude": 41.415,
+            "longitude": 19.72083333333333
+        },
+        {
+            "iata": "BCN",
+            "shortName": "Barcelona El Prat",
+            "countryName": "Hiszpania",
+            "countryCode": "ES",
+            "latitude": 41.29694444444444,
+            "longitude": 2.0783333333333336
+        },
+        {
+            "iata": "GDN",
+            "shortName": "Gdańsk",
+            "countryName": "Polska",
+            "countryCode": "PL",
+            "latitude": 54.3775,
+            "longitude": 18.46611111111111
+        },
+        {
+            "iata": "KTW",
+            "shortName": "Katowice",
+            "countryName": "Polska",
+            "countryCode": "PL",
+            "latitude": 50.483333333333334,
+            "longitude": 19.083333333333332
+        },
+        {
+            "iata": "WAW",
+            "shortName": "Warszawa Chopin\r\n",
+            "countryName": "Polska",
+            "countryCode": "PL",
+            "latitude": 52.16583333333333,
+            "longitude": 20.96722222222222
+        },
+        {
+            "iata": "WRO",
+            "shortName": "Wrocław",
+            "countryName": "Polska",
+            "countryCode": "PL",
+            "latitude": 51.10277777777778,
+            "longitude": 16.885833333333334
+        },
+        {
+            "iata": "LTN",
+            "shortName": "Londyn-Luton",
+            "countryName": "Wielka Brytania",
+            "countryCode": "GB",
+            "latitude": 51.874722222222225,
+            "longitude": -0.3683333333333333
+        },
+        {
+            "iata": "CTA",
+            "shortName": "Katania (Sycylia)",
+            "countryName": "Włochy",
+            "countryCode": "IT",
+            "latitude": 37.46666666666667,
+            "longitude": 15.06388888888889
+        }
+    ]
+}

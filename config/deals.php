@@ -191,6 +191,10 @@ return [
         // only the fallback when discovery fails.
         'fallback_version' => (string) env('DEAL_WIZZAIR_VERSION', '29.9.0'),
         'version_cache_ttl' => 86400,
+        // The timetable names no airports, only codes. The same backend serves
+        // the whole station list - in Polish - and it barely changes.
+        'language' => 'pl-pl',
+        'stations_cache_ttl' => 604800,
         // The timetable endpoint needs an explicit route, so the ones worth
         // watching are listed here.
         'routes' => [

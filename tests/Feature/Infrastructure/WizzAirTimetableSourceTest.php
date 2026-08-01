@@ -13,6 +13,7 @@ use App\Domain\Deal\ValueObject\Money;
 use App\Domain\Deal\ValueObject\SearchCriteria;
 use App\Domain\Deal\ValueObject\StayWindow;
 use App\Infrastructure\DealSource\WizzAirApiVersionResolver;
+use App\Infrastructure\DealSource\WizzAirStationDirectory;
 use App\Infrastructure\DealSource\WizzAirTimetableSource;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\Factory as HttpClient;
@@ -44,6 +45,19 @@ final class WizzAirTimetableSourceTest extends TestCase
         $this->assertStringContainsString('/booking/select-flight/WAW/LTN/2026-08-05', $first->url);
     }
 
+    public function test_it_names_the_airports_the_timetable_only_codes(): void
+    {
+        $this->fakeApi();
+
+        $first = $this->source()->findDeals($this->criteria())[0];
+
+        // The timetable says "WAW" and "LTN" and nothing else, which put every
+        // Wizz Air offer on the board as a bare code.
+        $this->assertSame('Warszawa Chopin', $first->origin?->label());
+        $this->assertSame('Londyn-Luton', $first->destination?->label());
+        $this->assertSame('Wielka Brytania', $first->destination?->countryName);
+    }
+
     public function test_the_booking_link_opens_the_search_rather_than_the_homepage(): void
     {
         $this->fakeApi();
@@ -73,7 +87,11 @@ final class WizzAirTimetableSourceTest extends TestCase
         });
 
         // GDN is configured but not watched, so only one route was queried.
-        Http::assertSentCount(2);
+        // Counted against the timetable alone: the version and the station list
+        // are looked up as well, and neither is a route.
+        $this->assertCount(1, Http::recorded(
+            static fn ($request): bool => str_contains((string) $request->url(), '/Api/search/timetable'),
+        ));
     }
 
     public function test_it_caps_the_window_the_endpoint_accepts(): void
@@ -281,6 +299,7 @@ final class WizzAirTimetableSourceTest extends TestCase
     {
         Http::fake([
             'wizzair.com/en-gb' => Http::response('<script src="https://be.wizzair.com/29.9.0/Api/"></script>'),
+            'be.wizzair.com/*/Api/asset/map*' => Http::response($this->fixture('WizzAir/stations.json')),
             'be.wizzair.com/*' => Http::response($this->fixture('WizzAir/timetable.json')),
         ]);
     }
@@ -292,13 +311,24 @@ final class WizzAirTimetableSourceTest extends TestCase
     {
         $http = $this->app->make(HttpClient::class);
 
+        $versionResolver = new WizzAirApiVersionResolver(
+            $http,
+            Cache::store('array'),
+            'https://wizzair.com/en-gb',
+            '1.2.3',
+            5,
+            60,
+        );
+
         return new WizzAirTimetableSource(
             $http,
-            new WizzAirApiVersionResolver(
+            $versionResolver,
+            new WizzAirStationDirectory(
                 $http,
                 Cache::store('array'),
-                'https://wizzair.com/en-gb',
-                '1.2.3',
+                $versionResolver,
+                'https://be.wizzair.com',
+                'pl-pl',
                 5,
                 60,
             ),

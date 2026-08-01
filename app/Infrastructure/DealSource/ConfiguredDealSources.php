@@ -98,15 +98,26 @@ final readonly class ConfiguredDealSources
         }
 
         if ((bool) $this->config->get('deals.wizzair.enabled')) {
+            $versionResolver = new WizzAirApiVersionResolver(
+                $this->http,
+                $this->cache,
+                (string) $this->config->get('deals.wizzair.site_url'),
+                (string) $this->config->get('deals.wizzair.fallback_version'),
+                $this->timeout(),
+                (int) $this->config->get('deals.wizzair.version_cache_ttl'),
+            );
+
             $sources[] = new WizzAirTimetableSource(
                 $this->http,
-                new WizzAirApiVersionResolver(
+                $versionResolver,
+                new WizzAirStationDirectory(
                     $this->http,
                     $this->cache,
-                    (string) $this->config->get('deals.wizzair.site_url'),
-                    (string) $this->config->get('deals.wizzair.fallback_version'),
+                    $versionResolver,
+                    (string) $this->config->get('deals.wizzair.api_url'),
+                    (string) $this->config->get('deals.wizzair.language'),
                     $this->timeout(),
-                    (int) $this->config->get('deals.wizzair.version_cache_ttl'),
+                    (int) $this->config->get('deals.wizzair.stations_cache_ttl'),
                 ),
                 $this->pairing,
                 (string) $this->config->get('deals.wizzair.api_url'),

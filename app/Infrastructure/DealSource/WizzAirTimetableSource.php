@@ -36,6 +36,7 @@ final readonly class WizzAirTimetableSource implements DealSource
     public function __construct(
         private HttpClient $http,
         private WizzAirApiVersionResolver $versionResolver,
+        private WizzAirStationDirectory $stations,
         private RoundTripPairing $pairing,
         private string $apiUrl,
         private string $bookingUrl,
@@ -240,8 +241,10 @@ final readonly class WizzAirTimetableSource implements DealSource
                 continue;
             }
 
-            $origin = Airport::fromIataCode($departureStation);
-            $destination = Airport::fromIataCode($arrivalStation);
+            // The timetable answers with codes alone; the directory is what
+            // turns them into somewhere a person recognises.
+            $origin = $this->stations->lookUp($departureStation);
+            $destination = $this->stations->lookUp($arrivalStation);
             $money = Money::fromDecimal($price['amount'], $price['currencyCode']);
 
             foreach ($this->departureTimes($flight) as $departsAt) {
