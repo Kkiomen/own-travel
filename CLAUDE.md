@@ -107,6 +107,31 @@ It filters what has already been found; it does not steer the scan. Nothing outs
 
 A half-given or backwards range is treated as no filter at all, exactly like an unusable IATA code: the dashboard is a set of links, and a hand-edited one should show everything rather than fail.
 
+### The JSON API
+
+The same deals, for the owner's other apps to embed. **`docs/api.md` is the guide written for the consuming app** — how to protect it, how to call it, what every filter and field means, and how to rebuild the views; keep it in step when the API changes. Read-only, unauthenticated like the rest of the app — the protection is still not exposing the port, so **do not publish `/api` where the dashboard is not published**. CORS is Laravel's default (`api/*`, any origin), which is what lets a browser-side client read it.
+
+| Route | Answers with |
+| --- | --- |
+| `GET /api/v1/dashboard` | **The whole screen in one request** — literally the props the page is rendered from: `deals`, `undated_trips`, the filters that took effect, `airports`, `totals`, `thresholds`, `currency`. |
+| `GET /api/v1/deals` | `data`, `undated_trips`, `meta` (count, limit, currency, filters, `generated_at`) — the lighter list-only version. |
+| `GET /api/v1/deals/{id}` | One offer by its fingerprint, for linking straight to it. A departed flight is 404, not a listing nobody can book. |
+| `GET /api/v1/deals/airports` | The origin/destination facets under the filters already chosen. |
+| `GET /api/v1/deals/summary` | Totals per kind and the two gates. |
+| `GET /api/v1/meta` | The vocabulary for building controls: `sorts`, `types`, `boards`, `currency`, `thresholds`, `stay`, `preferred_origin`, `window_days`, `limits`. |
+| `GET /api/openapi.json` | The OpenAPI 3.1 contract. |
+| `GET /api/docs` | Swagger UI over it (loaded from a CDN — it is a developer's page, not part of the asset build). |
+
+Filters are the dashboard's own — `sort`, `type`, `weekends`, `steals`, `origin`, `destination`, `from`/`to` — plus `limit`, capped at 200.
+
+**The API is the dashboard's data, not a lookalike.** Both delivery layers read the query string through `App\Http\Query\DealQuery`, render offers through `App\Http\Presenter\DealPresenter`, and — for the whole board — build the same array through `App\Http\Presenter\DashboardPayload`, which is what `DealController` hands to Inertia. Adding something to the screen means adding it there, and both get it; `DealApiTest` asserts the JSON and the page props match key for key. Everything a URL cannot express is unchanged: ordering and filtering still happen in the query, prices go out as numbers and dates as ISO 8601, and an unusable value is still no filter at all rather than a 4xx.
+
+**`/api/v1/meta` carries values, never display copy.** What a `round_trip` is *called* is the reading app's decision, and this one is written in Polish — the labels (`typeLabels`, `boardLabels`, `sourceLabel`, `nightsLabel`) stay in `resources/js/lib/dealFormat.ts`, which another Vue app can simply copy along with `components/deals/` and the CSS tokens. Serving the Polish strings as well would make the API a second home for the same knowledge.
+
+**The OpenAPI document is PHP, not a checked-in YAML file** (`App\Http\OpenApi\DealApiSpecification`), so the sorts, the deal types, the boards and the configured page size are read from the code that already defines them. A document that has fallen behind the routes is worse than none — it tells the other app to call something that is not there — so `OpenApiDocumentTest` compares its paths against the registered `api/v1/*` routes and its enums against the domain's.
+
+`servers` in the document comes from `APP_URL`; set it on the VPS or the "Try it out" button will aim at localhost.
+
 ## Running it — everything is Dockerized
 
 There is no local PHP/Node workflow; the host PHP is 8.4.0 and cannot even resolve the dependency tree (Pest 5 needs ≥8.4.1). Run *all* PHP, Composer, npm and artisan commands inside containers.

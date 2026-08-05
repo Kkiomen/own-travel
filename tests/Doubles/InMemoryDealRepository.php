@@ -81,6 +81,17 @@ final class InMemoryDealRepository implements DealRepository
         return $deal->type === DealType::Trip && ($deal->trip->dates ?? []) === [];
     }
 
+    public function find(string $fingerprint, CarbonImmutable $now): ?Deal
+    {
+        $deal = $this->deals[$fingerprint] ?? null;
+
+        if ($deal === null || ($deal->departsAt !== null && $deal->departsAt->lessThan($now))) {
+            return null;
+        }
+
+        return $deal;
+    }
+
     public function summarise(CarbonImmutable $now): DealSummary
     {
         $counts = [];

@@ -28,6 +28,15 @@ interface DealRepository
     public function list(DealListing $listing): array;
 
     /**
+     * One known deal, by the fingerprint it is identified with.
+     *
+     * A flight that has already departed is gone, exactly as it is gone from
+     * the listing - a link to it should say so rather than show an offer
+     * nobody can take.
+     */
+    public function find(string $fingerprint, CarbonImmutable $now): ?Deal;
+
+    /**
      * How many deals of each kind are on offer, and the cheapest of each.
      */
     public function summarise(CarbonImmutable $now): DealSummary;

@@ -163,6 +163,20 @@ final readonly class EloquentDealRepository implements DealRepository
         );
     }
 
+    public function find(string $fingerprint, CarbonImmutable $now): ?Deal
+    {
+        $record = DealRecord::query()
+            ->where('fingerprint', $fingerprint)
+            ->where(function (Builder $departures) use ($now): void {
+                $departures
+                    ->whereNull('departs_at')
+                    ->orWhere('departs_at', '>=', $now);
+            })
+            ->first();
+
+        return $record === null ? null : $this->toDeal($record);
+    }
+
     public function summarise(CarbonImmutable $now): DealSummary
     {
         // Plain query builder: these are aggregates, not deals, and asking the
